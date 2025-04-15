@@ -2,6 +2,42 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
+def pool_min(input_array, pool_size, stride):
+    """
+    对输入的numpy数组进行池化操作，对最后一个维度分别取最小值，并支持设置步长。
+
+    参数:
+    - input_array: 输入的 numpy.ndarray, 形状为 (H, W, C)
+    - pool_size: 池化窗口的大小 (pool_height, pool_width)
+    - stride: 滑动步长 (stride_height, stride_width)
+
+    返回:
+    - pooled_array: 池化后的数组
+    """
+    pool_height, pool_width = pool_size
+    stride_height, stride_width = stride
+    H, W, C = input_array.shape
+
+    # 计算池化后输出的高度和宽度
+    out_height = (H - pool_height) // stride_height + 1
+    out_width = (W - pool_width) // stride_width + 1
+
+    # 初始化池化结果
+    pooled_array = np.zeros((out_height, out_width, C))
+
+    # 遍历每个通道
+    for c in range(C):
+        for i in range(out_height):
+            for j in range(out_width):
+                # 确定池化窗口的范围
+                h_start, h_end = i * stride_height, i * stride_height + pool_height
+                w_start, w_end = j * stride_width, j * stride_width + pool_width
+
+                # 在池化窗口中取最小值
+                pooled_array[i, j, c] = np.max(input_array[h_start:h_end, w_start:w_end, c])
+
+    return pooled_array
+
 
 def statis_col(y, h, x, image, background_color):
     cnt_c = 0
@@ -136,6 +172,7 @@ def two_pass_scaling(input_image, color_threshold, background_color):
 
 # 加载输入图像
 input_image = cv2.imread('colorbar.png')
+input_image = pool_min(input_image, [2, 2], [2, 2])
 
 # 设置颜色相似性阈值
 color_threshold = 50
