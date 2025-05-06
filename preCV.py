@@ -1,42 +1,120 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 
-# 设置颜色相似性阈值
-color_threshold = 50
-background_color = [0, 0, 0]  # 黑色背景
-# Pooling
-margin = 2
-barwidth = 5
+# Pre
+color_threshold = 2
+background_color = [0, 0, 0]  # 黑色
+grid_red = [0, 0, 128]  # 暗红
+bar_red = [50, 50, 255]
+bar_blue = [252, 252, 84]
+screen_tensor = torch.zeros(7, 4)
+
+# Bar
+bar_1step = 2
+bar_step = 7
+bar_lstep = 1308
+barmid_1step = 4
+
+# Grid
 grid = 1
-mid_line = 1
+grid_1stepX = 1
+grid_1stepY = 61
+grid_stepX = 3
+grid_stepY = 72
+grid2_1stepX = 4
+grid2_1stepY = 61
+grid2_stepX = 6
+grid2_stepY = 72
 
 
-def mask_grid(input_array):
+def screen_abstract(input_array):
     H, W, C = input_array.shape
 
-    # 遍历每个通道
-    for c in range(C):
-        for i in range(1, H - 1):
-            for j in range(1, W - 1):
-                # 确定池化窗口的范围
-                h_start, h_end = i - grid, i + grid
-                w_start, w_end = j - grid, j + grid
+    # Red cut
+    for i in range(grid_1stepY, H - 1, grid_stepY):
+        for j in range(grid_1stepX, W - 1, grid_stepX):
+            # 确定池化窗口的范围
+            h_start, h_end = i - grid, i + grid
+            w_start, w_end = j - grid, j + grid
 
-                # mask grid
-                flag = 0
-                for h in range(h_start, h_end):
-                    if flag != 0:
-                        break
-                    for w in range(w_start, w_end):
-                        if h != i and w != j:
-                            background_distance = calculate_color_distance(input_array[h, w], background_color)
-                            if background_distance > color_threshold:
-                                flag = 1
-                                break
-                if flag == 0:
-                    input_array[i, j] = background_color
+            # mask grid
+            flag = 0
+            for h in range(h_start, h_end):
+                if flag != 0:
+                    break
+                for w in range(w_start, w_end):
+                    if h != i and w != j:
+                        background_distance = calculate_color_distance(input_array[h, w], background_color)
+                        red_distance = calculate_color_distance(input_array[h, w], bar_red)
+                        if red_distance < color_threshold or background_distance > color_threshold:
+                            flag = 1
+                            break
+            if flag == 0:
+                input_array[i, j] = background_color
+
+    # Red_dark cut
+    for i in range(grid2_1stepY, H - 1, grid2_stepY):
+        for j in range(grid2_1stepX, W - 1, grid2_stepX):
+            grid_distance = calculate_color_distance(input_array[i, j], grid_red)
+            if grid_distance < color_threshold:
+                input_array[i, j] = background_color
+
     return input_array
+
+
+def screen_tensor(input_array):
+    screen_abstracted = screen_abstract(input_array)
+    H, W, C = screen_abstracted.shape
+    # cv2.imwrite('screen_abstracted.jpg', screen_abstracted)
+    screen_tensor = torch.zeros(int((bar_lstep - bar_1step) / bar_step), 4)
+    # Bar abstract
+    # avg
+    axix = 0
+    for i in range(bar_1step, H, bar_step):
+        # avg_high
+        cnt = 0
+        for j in range(W):
+            red_distance = calculate_color_distance(input_array[i, j], bar_red)
+            bar_blue_distance = calculate_color_distance(input_array[i, j], bar_blue)
+            if red_distance < color_threshold or bar_blue_distance < color_threshold:
+                break
+            cnt += 1
+        screen_tensor[axix, 0] = cnt
+        # avg_low
+        cnt = 0
+        for j in reversed(range(W)):
+            red_distance = calculate_color_distance(input_array[i, j], bar_red)
+            bar_blue_distance = calculate_color_distance(input_array[i, j], bar_blue)
+            if red_distance < color_threshold or bar_blue_distance < color_threshold:
+                break
+            cnt += 1
+        screen_tensor[axix, 1] = cnt
+        axix += 1
+    # est
+    axix = 0
+    for i in range(bar_1step, H, bar_step):
+        # avg_high
+        cnt = 0
+        for j in range(W):
+            red_distance = calculate_color_distance(input_array[i, j], bar_red)
+            bar_blue_distance = calculate_color_distance(input_array[i, j], bar_blue)
+            if red_distance < color_threshold or bar_blue_distance < color_threshold:
+                break
+            cnt += 1
+        screen_tensor[axix, 2] = cnt
+        # avg_low
+        cnt = 0
+        for j in reversed(range(W)):
+            red_distance = calculate_color_distance(input_array[i, j], bar_red)
+            bar_blue_distance = calculate_color_distance(input_array[i, j], bar_blue)
+            if red_distance < color_threshold or bar_blue_distance < color_threshold:
+                break
+            cnt += 1
+        screen_tensor[axix, 3] = cnt
+        axix += 1
+    return screen_tensor
 
 
 def pool_min(input_array, pool_size, stride):
@@ -71,12 +149,12 @@ def pool_min(input_array, pool_size, stride):
                 w_start, w_end = j * stride_width, j * stride_width + pool_width
 
                 # 在池化窗口中取最小值
-                pooled_array[i, j, c] = np.min(input_array[h_start:h_end, w_start:w_end, c])
+                pooled_array[i, j, c] = np.max(input_array[h_start:h_end, w_start:w_end, c])
 
     return pooled_array
 
 
-def statis_col(y, h, x, image):
+def statis_col(y, h, x, image, background_color):
     cnt_c = 0
     for yy in range(y, h):
         background_distance = calculate_color_distance(background_color, image[yy, x])
@@ -95,7 +173,7 @@ def calculate_color_distance(color1, color2):
     return np.sqrt(np.sum((np.array(color1) - np.array(color2)) ** 2))
 
 
-def vertical_scaling(image):
+def vertical_scaling(image, color_threshold, background_color):
     """
     对图像进行纵向缩放。
     :param image: 输入图像（BGR 格式）
@@ -122,7 +200,7 @@ def vertical_scaling(image):
                 # 保留当前区域并重新开始
                 column.append(image[y, x])
                 current_region = [image[y, x].tolist()]
-                cnt_c = statis_col(y, h, x, image)
+                cnt_c = statis_col(y, h, x, image, background_color)
                 continue
         cnt_bg.append(cnt_b)
         cnt_col.append(cnt_c)
@@ -144,7 +222,7 @@ def vertical_scaling(image):
     return vertical_result[:len(scaled_image[0])], cnt_bg, cnt_col
 
 
-def horizontal_scaling(image, cnt_bg, cnt_col):
+def horizontal_scaling(image, color_threshold, cnt_bg, cnt_col, background_color):
     """
     对图像进行横向缩放。
     :param image: 输入图像（BGR 格式）
@@ -189,7 +267,7 @@ def horizontal_scaling(image, cnt_bg, cnt_col):
     return horizontal_result[:, :len(scaled_image[0])], cntpool
 
 
-def two_pass_scaling(input_image):
+def two_pass_scaling(input_image, color_threshold, background_color):
     """
     基于两次缩放（纵向+横向）的自适应图像缩放算法。
     :param image: 输入图像（BGR 格式）
@@ -197,25 +275,23 @@ def two_pass_scaling(input_image):
     :return: 缩放后的图像
     """
     # 调试中间结果
-    vertical_scaled, cnt_bg, cnt_col = vertical_scaling(input_image)
+    vertical_scaled, cnt_bg, cnt_col = vertical_scaling(input_image, color_threshold, background_color)
     cv2.imwrite('debug_vertical_scaled.jpg', vertical_scaled)  # 保存纵向缩放结果
     print("Vertical scaled shape:", vertical_scaled.shape)
 
-    final_scaled, cntpool = horizontal_scaling(vertical_scaled, cnt_bg, cnt_col)
+    final_scaled, cntpool = horizontal_scaling(vertical_scaled, color_threshold, cnt_bg, cnt_col, background_color)
     cv2.imwrite('debug_final_scaled.jpg', final_scaled)  # 保存横向缩放结果
     print("Final scaled shape:", final_scaled.shape)
     return final_scaled, cntpool
 
 
-# 加载输入图像
 input_image = cv2.imread('colbar2.png')
-# mask_image = mask_grid(input_image)
+screen_tensored = screen_tensor(input_image[:348])
 
-pool_image = pool_min(input_image, [grid + 1, 1], [1, 1])
-cv2.imwrite('pool_vert.jpg', pool_image)
+input_image = pool_min(input_image, [2, 2], [2, 2])
 
 # 执行两次缩放算法
-output_image, cntpool = two_pass_scaling(pool_image)
+output_image, cntpool = two_pass_scaling(input_image, color_threshold, background_color)
 
 # 保存并显示结果
 cv2.imwrite('scaled_image.jpg', output_image)
